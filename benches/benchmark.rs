@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use hungarian::hungarian;
 
-pub fn criterion_benchmark(c: &mut Criterion) {
+pub fn standard_benchmark(c: &mut Criterion) {
     #[rustfmt::skip]
     let costs = nalgebra::Matrix5::from_row_slice(
         &[
@@ -14,9 +14,23 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     );
 
     c.bench_function("hungarian", |b| {
-        b.iter(|| black_box(hungarian(black_box(&mut costs.clone()))))
+        b.iter(|| hungarian(black_box(&mut costs.clone())))
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+pub fn random_benchmarks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("random_of_size");
+    for size in (1..7).map(|i| 2usize.pow(i)) {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_batched_ref(
+                || nalgebra::DMatrix::<f64>::new_random(size, size),
+                hungarian,
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, standard_benchmark, random_benchmarks);
 criterion_main!(benches);
