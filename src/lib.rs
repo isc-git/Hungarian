@@ -47,6 +47,7 @@ where
 
     // find all non-starred zeros and prime them
     let mut primed = Vec::new();
+    let mut path = Vec::new();
     'outer: loop {
         for r in 0..h {
             // if a prime exists in this row, it is covered
@@ -73,7 +74,7 @@ where
                             continue 'outer;
                         }
                         None => {
-                            let mut path = vec![(r, c)];
+                            path.push((r, c));
                             let mut current = (r, c);
                             while let Some(star) =
                                 starred.iter().find(|(_s_r, s_c, _s_d)| *s_c == current.1)
@@ -89,22 +90,23 @@ where
                                 path.push(current);
                             }
 
-                            for (path_r, path_c) in path.into_iter() {
+                            for (path_r, path_c) in path.iter() {
                                 if let Some(index) = starred
                                     .iter()
-                                    .position(|(s_r, s_c, _)| *s_r == path_r && *s_c == path_c)
+                                    .position(|(s_r, s_c, _)| *s_r == *path_r && *s_c == *path_c)
                                 {
                                     starred.remove(index);
                                 }
 
                                 if primed
                                     .iter()
-                                    .any(|(p_r, p_c)| *p_r == path_r && *p_c == path_c)
+                                    .any(|(p_r, p_c)| *p_r == *path_r && *p_c == *path_c)
                                 {
-                                    starred.push((path_r, path_c, Direction::Vertical));
+                                    starred.push((*path_r, *path_c, Direction::Vertical));
                                 }
                             }
 
+                            path.clear();
                             primed.clear();
                             starred
                                 .iter_mut()
