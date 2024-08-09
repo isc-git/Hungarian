@@ -1,9 +1,17 @@
 use nalgebra::RawStorageMut;
 
 #[derive(Debug, Clone, PartialEq)]
-enum Direction {
+enum AllocationStatus {
     Vertical,
     Horizontal,
+    Prime,
+}
+
+#[derive(Debug, Clone)]
+pub struct Allocation {
+    row: usize,
+    col: usize,
+    status: AllocationStatus,
 }
 
 pub fn hungarian<T, D, S>(costs: &mut nalgebra::SquareMatrix<T, D, S>) -> Vec<usize>
@@ -26,15 +34,19 @@ where
 
     // try to assign abritrary zeroes on distinct rows and columns
     let (h, w) = costs.shape();
-    let mut starred = Vec::new();
-    for r in 0..h {
-        for c in 0..w {
-            if starred.iter().any(|(_, star_col, _)| *star_col == c) {
+    let mut allocations = Vec::with_capacity(w);
+    for row in 0..h {
+        for col in 0..w {
+            if allocations.iter().any(|a: &Allocation| a.col == col) {
                 continue;
             }
 
-            if costs[(r, c)].abs() < T::default_epsilon() {
-                starred.push((r, c, Direction::Vertical));
+            if costs[(row, col)].abs() < T::default_epsilon() {
+                allocations.push(Allocation {
+                    row,
+                    col,
+                    status: AllocationStatus::Vertical,
+                });
                 // breaks such that no more values are checked on this row
                 break;
             }
@@ -42,115 +54,153 @@ where
     }
 
     // find all non-starred zeros and prime them
-    let mut primed = Vec::new();
     'outer: loop {
-        for r in 0..h {
+        for row in 0..h {
             // if a prime exists in this row, it is covered
-            if primed.iter().any(|(p_row, _p_col)| *p_row == r) {
+            if allocations.iter().any(|a| match a.status {
+                AllocationStatus::Vertical => false,
+                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
+            }) {
                 continue;
             }
 
-            for c in 0..w {
+            for col in 0..w {
                 // if a star not covered by a prime exists on this column, skip
-                if starred.iter().any(|(s_row, s_col, s_dir)| match s_dir {
-                    Direction::Vertical => *s_col == c,
-                    Direction::Horizontal => *s_col == c && *s_row == r,
+                if allocations.iter().any(|a| match a.status {
+                    AllocationStatus::Vertical => a.col == col,
+                    // we have already checked this condition
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
                 }) {
                     continue;
                 }
 
                 // check if this value is zero
-                if costs[(r, c)].abs() < T::default_epsilon() {
+                if costs[(row, col)].abs() < T::default_epsilon() {
                     // found an uncovered zero
-                    primed.push((r, c));
-                    match starred.iter_mut().find(|(s_r, _s_c, _s_d)| *s_r == r) {
+
+                    match allocations.iter().position(|a| match a.status {
+                        AllocationStatus::Vertical | AllocationStatus::Horizontal => a.row == row,
+                        AllocationStatus::Prime => false,
+                    }) {
                         Some(star) => {
-                            star.2 = Direction::Horizontal;
+                            allocations[star].status = AllocationStatus::Horizontal;
+                            allocations.push(Allocation {
+                                row,
+                                col,
+                                status: AllocationStatus::Prime,
+                            });
                         }
                         None => {
-                            let mut current = (r, c);
-                            starred.push((r, c, Direction::Vertical));
+                            let mut current = (row, col);
                             // a vertical star is an unpathed star
-                            starred
-                                .iter_mut()
-                                .for_each(|(_, _, d)| *d = Direction::Vertical);
+                            allocations.iter_mut().for_each(|a| {
+                                if a.status == AllocationStatus::Horizontal {
+                                    a.status = AllocationStatus::Vertical;
+                                }
+                            });
 
-                            while let Some(star_index) =
-                                starred.iter().position(|(_s_r, s_c, s_d)| {
-                                    *s_c == current.1 && *s_d == Direction::Vertical
-                                })
-                            {
-                                let star = starred.remove(star_index);
-                                current.0 = star.0;
+                            // add the starting position as a new star
+                            allocations.push(Allocation {
+                                row,
+                                col,
+                                status: AllocationStatus::Horizontal,
+                            });
 
-                                let prime_index = primed
-                                    .iter()
-                                    .position(|(p_r, _p_c)| *p_r == current.0)
+                            while let Some(star_index) = allocations.iter().position(|a| {
+                                a.status == AllocationStatus::Vertical && a.col == current.1
+                            }) {
+                                let star = allocations.remove(star_index);
+                                current.0 = star.row;
+
+                                let prime = allocations
+                                    .iter_mut()
+                                    .find(|a| {
+                                        a.status == AllocationStatus::Prime && a.row == current.0
+                                    })
                                     .expect("known");
 
-                                let prime = primed.remove(prime_index);
-                                current.1 = prime.1;
-                                starred.push((current.0, current.1, Direction::Horizontal));
+                                prime.status = AllocationStatus::Horizontal;
+                                current.1 = prime.col;
                             }
 
-                            primed.clear();
-                            starred
-                                .iter_mut()
-                                .for_each(|(_, _, d)| *d = Direction::Vertical);
+                            allocations.retain(|a| a.status != AllocationStatus::Prime);
+                            allocations.iter_mut().for_each(|a| {
+                                a.status = AllocationStatus::Vertical;
+                            });
                         }
                     }
+
                     continue 'outer;
                 }
             }
         }
 
-        if starred.len() == h {
+        if allocations
+            .iter()
+            .filter(|d| match d.status {
+                AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
+                AllocationStatus::Prime => false,
+            })
+            .count()
+            == h
+        {
             break;
         }
 
         let mut min = T::max_value().expect("real value has maximum");
-        for r in 0..h {
-            if primed.iter().any(|(p_r, _p_c)| *p_r == r) {
+        for row in 0..h {
+            if allocations.iter().any(|a| match a.status {
+                AllocationStatus::Vertical => false,
+                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
+            }) {
                 continue;
             }
 
-            for c in 0..w {
-                if starred.iter().any(|(b, a, d)| match d {
-                    Direction::Vertical => *a == c,
-                    Direction::Horizontal => *b == r && *a == c,
+            for col in 0..w {
+                if allocations.iter().any(|a| match a.status {
+                    AllocationStatus::Vertical => a.col == col,
+                    // we have already checked this condition
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
                 }) {
                     continue;
                 }
 
-                min = min.min(costs[(r, c)]);
+                min = min.min(costs[(row, col)]);
             }
         }
 
-        for r in 0..h {
-            for c in 0..w {
-                let covered_row = primed.iter().any(|(a, _)| *a == r)
-                    || starred.iter().any(|(a, b, d)| match d {
-                        Direction::Vertical => *b == c,
-                        Direction::Horizontal => *a == r,
-                    });
+        for row in 0..h {
+            for col in 0..w {
+                let covered_row = allocations.iter().any(|a| match a.status {
+                    AllocationStatus::Vertical => false,
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
+                });
 
-                let covered_col = starred.iter().any(|(b, a, d)| match d {
-                    Direction::Vertical => *a == c,
-                    Direction::Horizontal => *a == c && *b == r,
+                let covered_col = allocations.iter().any(|a| match a.status {
+                    AllocationStatus::Vertical => a.col == col,
+                    // we have already checked this condition
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
                 });
 
                 match (covered_row, covered_col) {
-                    (true, true) => costs[(r, c)] += min,
+                    (true, true) => costs[(row, col)] += min,
                     (true, false) | (false, true) => {}
-                    (false, false) => costs[(r, c)] -= min,
+                    (false, false) => costs[(row, col)] -= min,
                 }
             }
         }
     }
 
     // sort by columns
-    starred.sort_unstable_by_key(|a| a.1);
-    starred.into_iter().map(|(r, _, _)| r).collect::<Vec<_>>()
+    allocations.sort_by_key(|a| a.col);
+    allocations
+        .into_iter()
+        .filter(|a| match a.status {
+            AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
+            AllocationStatus::Prime => false,
+        })
+        .map(|a| a.row)
+        .collect::<Vec<_>>()
     //starred.into_iter().map(|(r, c, _)| c).collect::<Vec<_>>()
 }
 
