@@ -1,6 +1,6 @@
 use nalgebra::RawStorageMut;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Direction {
     Vertical,
     Horizontal,
@@ -47,7 +47,6 @@ where
 
     // find all non-starred zeros and prime them
     let mut primed = Vec::new();
-    let mut path = Vec::new();
     'outer: loop {
         for r in 0..h {
             // if a prime exists in this row, it is covered
@@ -74,39 +73,31 @@ where
                             continue 'outer;
                         }
                         None => {
-                            path.push((r, c));
                             let mut current = (r, c);
-                            while let Some(star) =
-                                starred.iter().find(|(_s_r, s_c, _s_d)| *s_c == current.1)
+                            starred.push((r, c, Direction::Vertical));
+                            // a vertical star is an unpathed star
+                            starred
+                                .iter_mut()
+                                .for_each(|(_, _, d)| *d = Direction::Vertical);
+
+                            while let Some(star_index) =
+                                starred.iter().position(|(_s_r, s_c, s_d)| {
+                                    *s_c == current.1 && *s_d == Direction::Vertical
+                                })
                             {
+                                let star = starred.remove(star_index);
                                 current.0 = star.0;
-                                path.push(current);
 
-                                let prime = primed
+                                let prime_index = primed
                                     .iter()
-                                    .find(|(p_r, _p_c)| *p_r == current.0)
+                                    .position(|(p_r, _p_c)| *p_r == current.0)
                                     .expect("known");
+
+                                let prime = primed.remove(prime_index);
                                 current.1 = prime.1;
-                                path.push(current);
+                                starred.push((current.0, current.1, Direction::Horizontal));
                             }
 
-                            for (path_r, path_c) in path.iter() {
-                                if let Some(index) = starred
-                                    .iter()
-                                    .position(|(s_r, s_c, _)| *s_r == *path_r && *s_c == *path_c)
-                                {
-                                    starred.remove(index);
-                                }
-
-                                if primed
-                                    .iter()
-                                    .any(|(p_r, p_c)| *p_r == *path_r && *p_c == *path_c)
-                                {
-                                    starred.push((*path_r, *path_c, Direction::Vertical));
-                                }
-                            }
-
-                            path.clear();
                             primed.clear();
                             starred
                                 .iter_mut()
