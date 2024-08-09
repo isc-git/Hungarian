@@ -15,17 +15,13 @@ where
     // subtract minimum value from each respective row
     costs.row_iter_mut().for_each(|mut r| {
         let min = r.min();
-        for v in r.iter_mut() {
-            *v -= min;
-        }
+        r.add_scalar_mut(-min)
     });
 
     // subtract minimum value from each respective col
     costs.column_iter_mut().for_each(|mut c| {
         let min = c.min();
-        for v in c.iter_mut() {
-            *v -= min;
-        }
+        c.add_scalar_mut(-min);
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
@@ -37,7 +33,7 @@ where
                 continue;
             }
 
-            if costs.get((r, c)).expect("within bounds").abs() < T::default_epsilon() {
+            if costs[(r, c)].abs() < T::default_epsilon() {
                 starred.push((r, c, Direction::Vertical));
                 // breaks such that no more values are checked on this row
                 break;
@@ -64,13 +60,12 @@ where
                 }
 
                 // check if this value is zero
-                if costs.get((r, c)).expect("within bounds").abs() < T::default_epsilon() {
+                if costs[(r, c)].abs() < T::default_epsilon() {
                     // found an uncovered zero
                     primed.push((r, c));
                     match starred.iter_mut().find(|(s_r, _s_c, _s_d)| *s_r == r) {
                         Some(star) => {
                             star.2 = Direction::Horizontal;
-                            continue 'outer;
                         }
                         None => {
                             let mut current = (r, c);
@@ -102,10 +97,9 @@ where
                             starred
                                 .iter_mut()
                                 .for_each(|(_, _, d)| *d = Direction::Vertical);
-
-                            continue 'outer;
                         }
                     }
+                    continue 'outer;
                 }
             }
         }
@@ -128,7 +122,7 @@ where
                     continue;
                 }
 
-                min = min.min(*costs.get((r, c)).expect("within bounds"));
+                min = min.min(costs[(r, c)]);
             }
         }
 
@@ -146,16 +140,16 @@ where
                 });
 
                 match (covered_row, covered_col) {
-                    (true, true) => *costs.get_mut((r, c)).expect("within bounds") += min,
+                    (true, true) => costs[(r, c)] += min,
                     (true, false) | (false, true) => {}
-                    (false, false) => *costs.get_mut((r, c)).expect("within bounds") -= min,
+                    (false, false) => costs[(r, c)] -= min,
                 }
             }
         }
     }
 
     // sort by columns
-    starred.sort_by_key(|a| a.1);
+    starred.sort_unstable_by_key(|a| a.1);
     starred.into_iter().map(|(r, _, _)| r).collect::<Vec<_>>()
     //starred.into_iter().map(|(r, c, _)| c).collect::<Vec<_>>()
 }
