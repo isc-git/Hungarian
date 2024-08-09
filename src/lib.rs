@@ -14,12 +14,23 @@ pub struct Allocation {
     status: AllocationStatus,
 }
 
-pub fn hungarian<T, D, S>(costs: &mut nalgebra::SquareMatrix<T, D, S>) -> Vec<usize>
-where
+impl Allocation {
+    pub fn assignment(&self) -> (usize, usize) {
+        (self.row, self.col)
+    }
+}
+
+pub fn hungarian<T, D, S>(
+    costs: &mut nalgebra::SquareMatrix<T, D, S>,
+    assignments: &mut Vec<Allocation>,
+) where
     T: nalgebra::RealField + std::ops::Sub<T, Output = T> + Copy,
     D: nalgebra::Dim,
     S: nalgebra::RawStorage<T, D, D> + RawStorageMut<T, D, D>,
 {
+    let (h, w) = costs.shape();
+    assignments.clear();
+
     // subtract minimum value from each respective row
     costs.row_iter_mut().for_each(|mut r| {
         let min = r.min();
@@ -33,16 +44,14 @@ where
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
-    let (h, w) = costs.shape();
-    let mut allocations = Vec::with_capacity(w);
     for row in 0..h {
         for col in 0..w {
-            if allocations.iter().any(|a: &Allocation| a.col == col) {
+            if assignments.iter().any(|a: &Allocation| a.col == col) {
                 continue;
             }
 
             if costs[(row, col)].abs() < T::default_epsilon() {
-                allocations.push(Allocation {
+                assignments.push(Allocation {
                     row,
                     col,
                     status: AllocationStatus::Vertical,
@@ -57,7 +66,7 @@ where
     'outer: loop {
         for row in 0..h {
             // if a prime exists in this row, it is covered
-            if allocations.iter().any(|a| match a.status {
+            if assignments.iter().any(|a| match a.status {
                 AllocationStatus::Vertical => false,
                 AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
             }) {
@@ -66,7 +75,7 @@ where
 
             for col in 0..w {
                 // if a star not covered by a prime exists on this column, skip
-                if allocations.iter().any(|a| match a.status {
+                if assignments.iter().any(|a| match a.status {
                     AllocationStatus::Vertical => a.col == col,
                     // we have already checked this condition
                     AllocationStatus::Horizontal | AllocationStatus::Prime => false,
@@ -78,13 +87,13 @@ where
                 if costs[(row, col)].abs() < T::default_epsilon() {
                     // found an uncovered zero
 
-                    match allocations.iter().position(|a| match a.status {
+                    match assignments.iter().position(|a| match a.status {
                         AllocationStatus::Vertical | AllocationStatus::Horizontal => a.row == row,
                         AllocationStatus::Prime => false,
                     }) {
                         Some(star) => {
-                            allocations[star].status = AllocationStatus::Horizontal;
-                            allocations.push(Allocation {
+                            assignments[star].status = AllocationStatus::Horizontal;
+                            assignments.push(Allocation {
                                 row,
                                 col,
                                 status: AllocationStatus::Prime,
@@ -93,26 +102,26 @@ where
                         None => {
                             let mut current = (row, col);
                             // a vertical star is an unpathed star
-                            allocations.iter_mut().for_each(|a| {
+                            assignments.iter_mut().for_each(|a| {
                                 if a.status == AllocationStatus::Horizontal {
                                     a.status = AllocationStatus::Vertical;
                                 }
                             });
 
                             // add the starting position as a new star
-                            allocations.push(Allocation {
+                            assignments.push(Allocation {
                                 row,
                                 col,
                                 status: AllocationStatus::Horizontal,
                             });
 
-                            while let Some(star_index) = allocations.iter().position(|a| {
+                            while let Some(star_index) = assignments.iter().position(|a| {
                                 a.status == AllocationStatus::Vertical && a.col == current.1
                             }) {
-                                let star = allocations.remove(star_index);
+                                let star = assignments.remove(star_index);
                                 current.0 = star.row;
 
-                                let prime = allocations
+                                let prime = assignments
                                     .iter_mut()
                                     .find(|a| {
                                         a.status == AllocationStatus::Prime && a.row == current.0
@@ -123,8 +132,8 @@ where
                                 current.1 = prime.col;
                             }
 
-                            allocations.retain(|a| a.status != AllocationStatus::Prime);
-                            allocations.iter_mut().for_each(|a| {
+                            assignments.retain(|a| a.status != AllocationStatus::Prime);
+                            assignments.iter_mut().for_each(|a| {
                                 a.status = AllocationStatus::Vertical;
                             });
                         }
@@ -135,7 +144,7 @@ where
             }
         }
 
-        if allocations
+        if assignments
             .iter()
             .filter(|d| match d.status {
                 AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
@@ -149,7 +158,7 @@ where
 
         let mut min = T::max_value().expect("real value has maximum");
         for row in 0..h {
-            if allocations.iter().any(|a| match a.status {
+            if assignments.iter().any(|a| match a.status {
                 AllocationStatus::Vertical => false,
                 AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
             }) {
@@ -157,7 +166,7 @@ where
             }
 
             for col in 0..w {
-                if allocations.iter().any(|a| match a.status {
+                if assignments.iter().any(|a| match a.status {
                     AllocationStatus::Vertical => a.col == col,
                     // we have already checked this condition
                     AllocationStatus::Horizontal | AllocationStatus::Prime => false,
@@ -171,12 +180,12 @@ where
 
         for row in 0..h {
             for col in 0..w {
-                let covered_row = allocations.iter().any(|a| match a.status {
+                let covered_row = assignments.iter().any(|a| match a.status {
                     AllocationStatus::Vertical => false,
                     AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
                 });
 
-                let covered_col = allocations.iter().any(|a| match a.status {
+                let covered_col = assignments.iter().any(|a| match a.status {
                     AllocationStatus::Vertical => a.col == col,
                     // we have already checked this condition
                     AllocationStatus::Horizontal | AllocationStatus::Prime => false,
@@ -191,17 +200,10 @@ where
         }
     }
 
-    // sort by columns
-    allocations.sort_by_key(|a| a.col);
-    allocations
-        .into_iter()
-        .filter(|a| match a.status {
-            AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
-            AllocationStatus::Prime => false,
-        })
-        .map(|a| a.row)
-        .collect::<Vec<_>>()
-    //starred.into_iter().map(|(r, c, _)| c).collect::<Vec<_>>()
+    assignments.retain(|a| match a.status {
+        AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
+        AllocationStatus::Prime => false,
+    });
 }
 
 #[cfg(test)]
@@ -212,7 +214,7 @@ mod test {
 
     fn assert_costs<R, C, S>(
         costs: &Matrix<f64, R, C, S>,
-        assignments: &[usize],
+        assignments: &[Allocation],
         cost_expected: f64,
         epsilon: f64,
     ) -> bool
@@ -223,8 +225,7 @@ mod test {
     {
         (assignments
             .iter()
-            .enumerate()
-            .map(|(i, a)| costs.get((*a, i)).expect("within cost bounds"))
+            .map(|a| costs.get(a.assignment()).expect("within cost bounds"))
             .sum::<f64>()
             - cost_expected)
             .abs()
@@ -240,7 +241,8 @@ mod test {
                 2., 1.,
             ]
         );
-        let assignments = hungarian(&mut costs.clone());
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 2.;
         assert!(assert_costs(
             &costs,
@@ -259,7 +261,8 @@ mod test {
                 2., 100.
             ]
         );
-        let assignments = hungarian(&mut costs.clone());
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 4.;
         assert!(assert_costs(
             &costs,
@@ -280,7 +283,8 @@ mod test {
                  8.,  9., 98., 23.,
             ]
         );
-        let assignments = hungarian(&mut costs.clone());
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 140.;
         assert!(assert_costs(
             &costs,
@@ -302,7 +306,8 @@ mod test {
                  7., 9.,10., 4.,12.,
             ]
         );
-        let assignments = hungarian(&mut costs.clone());
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 23.;
         assert!(assert_costs(
             &costs,
@@ -324,7 +329,8 @@ mod test {
                 18., 18., 16., 19., 20.,
             ]
         );
-        let assignments = hungarian(&mut costs.clone());
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 86.;
         assert!(assert_costs(
             &costs,
