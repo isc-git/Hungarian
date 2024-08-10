@@ -6,22 +6,57 @@ enum AllocationStatus {
     Prime,
 }
 
-#[derive(Debug, Clone)]
-pub struct Allocation {
-    row: usize,
-    col: usize,
-    status: AllocationStatus,
+#[derive(Debug, Clone, Default)]
+pub struct Allocations {
+    row: Vec<usize>,
+    col: Vec<usize>,
+    row_prime: Vec<usize>,
+    col_prime: Vec<usize>,
 }
 
-impl Allocation {
-    pub fn assignment(&self) -> (usize, usize) {
-        (self.row, self.col)
+impl Allocations {
+    pub fn assignment(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.row.iter().cloned().zip(self.col.iter().cloned())
+    }
+
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.row.clear();
+        self.col.clear();
+        self.row_prime.clear();
+        self.col_prime.clear();
+    }
+
+    #[inline(always)]
+    pub fn submit_star(&mut self, row: usize, col: usize) {
+        self.row.push(row);
+        self.col.push(col);
+    }
+
+    #[inline(always)]
+    pub fn submit_prime(&mut self, row: usize, col: usize) {
+        self.row_prime.push(row);
+        self.col_prime.push(col);
+    }
+
+    #[inline(always)]
+    fn remove_star(&mut self, i: usize) -> (usize, usize) {
+        let row = self.row.remove(i);
+        let col = self.col.remove(i);
+        (row, col)
+    }
+
+    #[inline(always)]
+    fn remove_prime(&mut self, i: usize) -> (usize, usize) {
+        let row = self.row_prime.remove(i);
+        let col = self.col_prime.remove(i);
+        (row, col)
     }
 }
 
 pub fn hungarian<T, D, S>(
     costs: &mut nalgebra::SquareMatrix<T, D, S>,
-    assignments: &mut Vec<Allocation>,
+    assignments: &mut Allocations,
 ) where
     T: std::ops::Sub<T, Output = T>
         + Copy
@@ -59,17 +94,13 @@ pub fn hungarian<T, D, S>(
     // try to assign abritrary zeroes on distinct rows and columns
     for col in 0..w {
         for row in 0..h {
-            if assignments.iter().any(|a: &Allocation| a.row == row) {
+            if assignments.row.contains(&row) {
                 continue;
             }
 
             if costs[(row, col)].is_zero() {
                 covered_cols[col] = true;
-                assignments.push(Allocation {
-                    row,
-                    col,
-                    status: AllocationStatus::Star,
-                });
+                assignments.submit_star(row, col);
                 // breaks such that no more values are checked on this column
                 break;
             }
@@ -98,68 +129,52 @@ pub fn hungarian<T, D, S>(
         }
 
         if let Some((row, col)) = uncovered_zero {
-            match assignments.iter().find(|a| match a.status {
-                AllocationStatus::Star => a.row == row,
-                AllocationStatus::Prime => false,
-            }) {
-                Some(star) => {
-                    covered_cols[star.col] = false;
-                    covered_rows[star.row] = true;
-                    assignments.push(Allocation {
-                        row,
-                        col,
-                        status: AllocationStatus::Prime,
-                    });
+            match assignments.row.iter().enumerate().find(|(_, r)| row == **r) {
+                Some((star_index, star_row)) => {
+                    covered_cols[assignments.col[star_index]] = false;
+                    covered_rows[*star_row] = true;
+                    assignments.submit_prime(row, col)
                 }
                 None => {
                     let mut current = (row, col);
+                    let mut to_add = current;
                     // add the starting position as a new star
-                    assignments.push(Allocation {
-                        row,
-                        col,
-                        status: AllocationStatus::Star,
-                    });
+                    while let Some(star_index) =
+                        assignments.col.iter().position(|col| *col == current.1)
+                    {
+                        let (star_row, _) = assignments.remove_star(star_index);
+                        current.0 = star_row;
+                        assignments.submit_star(to_add.0, to_add.1);
 
-                    while let Some(star_index) = assignments.iter().position(|a| {
-                        a.status == AllocationStatus::Star
-                            && a.col == current.1
-                            && a.row != current.0
-                    }) {
-                        let star = assignments.remove(star_index);
-                        current.0 = star.row;
-
-                        let prime = assignments
-                            .iter_mut()
-                            .find(|a| a.status == AllocationStatus::Prime && a.row == current.0)
+                        let (prime_index, _) = assignments
+                            .row_prime
+                            .iter()
+                            .enumerate()
+                            .find(|(_, row)| **row == current.0)
                             .expect("known");
 
-                        prime.status = AllocationStatus::Star;
-                        current.1 = prime.col;
+                        let (_, prime_col) = assignments.remove_prime(prime_index);
+                        //assignments.submit_star(prime_row, prime_col);
+                        current.1 = prime_col;
+                        to_add = current
                     }
 
-                    assignments.retain(|a| a.status != AllocationStatus::Prime);
+                    assignments.submit_star(to_add.0, to_add.1);
+
                     covered_rows.fill(false);
                     covered_cols.fill(false);
-                    assignments.iter().for_each(|a| {
-                        if a.status == AllocationStatus::Star {
-                            covered_cols[a.col] = true;
-                        }
-                    });
+                    assignments.row_prime.clear();
+                    assignments.col_prime.clear();
+                    for assigned_col in assignments.col.iter() {
+                        covered_cols[*assigned_col] = true;
+                    }
                 }
             }
 
             continue;
         }
 
-        if assignments
-            .iter()
-            .filter(|d| match d.status {
-                AllocationStatus::Star => true,
-                AllocationStatus::Prime => false,
-            })
-            .count()
-            == h
-        {
+        if assignments.row.len() == h {
             break;
         }
 
@@ -195,11 +210,6 @@ pub fn hungarian<T, D, S>(
             }
         });
     }
-
-    assignments.retain(|a| match a.status {
-        AllocationStatus::Star => true,
-        AllocationStatus::Prime => false,
-    });
 }
 
 #[cfg(test)]
@@ -210,7 +220,7 @@ mod test {
 
     fn assert_costs<R, C, S>(
         costs: &Matrix<f64, R, C, S>,
-        assignments: &[Allocation],
+        assignments: &Allocations,
         cost_expected: f64,
         epsilon: f64,
     ) -> bool
@@ -220,8 +230,8 @@ mod test {
         S: RawStorage<f64, R, C>,
     {
         (assignments
-            .iter()
-            .map(|a| costs.get(a.assignment()).expect("within cost bounds"))
+            .assignment()
+            .map(|a| costs.get(a).expect("within cost bounds"))
             .sum::<f64>()
             - cost_expected)
             .abs()
@@ -232,19 +242,20 @@ mod test {
     fn null() {
         #[rustfmt::skip]
         let costs = nalgebra::DMatrix::<f64>::from_row_slice(0, 0, &[]);
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
-        assert!(assignments.is_empty());
+        assert!(assignments.assignment().collect::<Vec<_>>().is_empty());
     }
 
     #[test]
     fn unary() {
         #[rustfmt::skip]
         let costs = nalgebra::DMatrix::<f64>::from_row_slice(1, 1, &[1.]);
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
+        let assignments = assignments.assignment().collect::<Vec<_>>();
         assert!(assignments.len() == 1);
-        assert!(assignments[0].assignment() == (0, 0));
+        assert!(assignments[0] == (0, 0));
     }
 
     #[test]
@@ -256,7 +267,7 @@ mod test {
                 2., 1.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 2.;
         assert!(assert_costs(
@@ -276,7 +287,7 @@ mod test {
                 2., 100.
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 4.;
         assert!(assert_costs(
@@ -298,7 +309,7 @@ mod test {
                  8.,  9., 98., 23.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 140.;
         assert!(assert_costs(
@@ -319,7 +330,7 @@ mod test {
                 7., 3., 8., 
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 15.;
         assert!(assert_costs(
@@ -342,7 +353,7 @@ mod test {
                  7., 9.,10., 4.,12.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 23.;
         assert!(assert_costs(
@@ -363,7 +374,7 @@ mod test {
                  9., 8., 5.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 16.;
         assert!(assert_costs(
@@ -386,7 +397,7 @@ mod test {
                 18., 18., 16., 19., 20.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 86.;
         assert!(assert_costs(
@@ -408,7 +419,7 @@ mod test {
                 28., 17., 24., 24.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 78.;
         assert!(assert_costs(
@@ -430,7 +441,7 @@ mod test {
                 28., 84., 79., 81.,
             ]
         );
-        let mut assignments = Vec::with_capacity(costs.shape().1);
+        let mut assignments = Allocations::default();
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 137.;
         assert!(assert_costs(

@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use hungarian::hungarian;
+use hungarian::{hungarian, Allocations};
 
 pub fn standard_benchmark(c: &mut Criterion) {
     #[rustfmt::skip]
@@ -15,7 +15,7 @@ pub fn standard_benchmark(c: &mut Criterion) {
         ]
     );
 
-    let mut assignments = Vec::with_capacity(costs.shape().1);
+    let mut assignments = Allocations::default();
 
     c.bench_function("hungarian", |b| {
         b.iter(|| hungarian(black_box(&mut costs.clone()), black_box(&mut assignments)))
@@ -25,7 +25,7 @@ pub fn standard_benchmark(c: &mut Criterion) {
 pub fn random_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("random_of_size");
     for size in (1..7).map(|i| 2usize.pow(i)) {
-        let mut assignments = Vec::with_capacity(size);
+        let mut assignments = Allocations::default();
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
                 || nalgebra::DMatrix::<f64>::new_random(size, size),
@@ -40,7 +40,7 @@ pub fn random_benchmarks(c: &mut Criterion) {
 pub fn random_benchmarks_i32(c: &mut Criterion) {
     let mut group = c.benchmark_group("random_i32_of_size");
     for size in (1..7).map(|i| 2usize.pow(i)) {
-        let mut assignments = Vec::with_capacity(size);
+        let mut assignments = Allocations::default();
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
                 || nalgebra::DMatrix::<i32>::new_random(size, size),
