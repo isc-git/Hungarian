@@ -2,8 +2,7 @@ use nalgebra::RawStorageMut;
 
 #[derive(Debug, Clone, PartialEq)]
 enum AllocationStatus {
-    Vertical,
-    Horizontal,
+    Star,
     Prime,
 }
 
@@ -42,6 +41,8 @@ pub fn hungarian<T, D, S>(
 {
     let (h, w) = costs.shape();
     assignments.clear();
+    let mut covered_rows = vec![false; h];
+    let mut covered_cols = vec![false; w];
 
     // subtract minimum value from each respective row
     costs.row_iter_mut().for_each(|mut r| {
@@ -61,11 +62,13 @@ pub fn hungarian<T, D, S>(
             if assignments.iter().any(|a: &Allocation| a.row == row) {
                 continue;
             }
+
             if costs[(row, col)].is_zero() {
+                covered_cols[col] = true;
                 assignments.push(Allocation {
                     row,
                     col,
-                    status: AllocationStatus::Vertical,
+                    status: AllocationStatus::Star,
                 });
                 // breaks such that no more values are checked on this column
                 break;
@@ -77,20 +80,12 @@ pub fn hungarian<T, D, S>(
     loop {
         let mut uncovered_zero = None;
         'zero_finder: for col in 0..w {
-            if assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => a.col == col,
-                // we have already checked this condition
-                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
-            }) {
+            if covered_cols[col] {
                 continue;
             }
 
             for row in 0..h {
-                // if a prime exists in this row, it is covered
-                if assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => false,
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
-                }) {
+                if covered_rows[row] {
                     continue;
                 }
 
@@ -103,12 +98,13 @@ pub fn hungarian<T, D, S>(
         }
 
         if let Some((row, col)) = uncovered_zero {
-            match assignments.iter().position(|a| match a.status {
-                AllocationStatus::Vertical | AllocationStatus::Horizontal => a.row == row,
+            match assignments.iter().find(|a| match a.status {
+                AllocationStatus::Star => a.row == row,
                 AllocationStatus::Prime => false,
             }) {
                 Some(star) => {
-                    assignments[star].status = AllocationStatus::Horizontal;
+                    covered_cols[star.col] = false;
+                    covered_rows[star.row] = true;
                     assignments.push(Allocation {
                         row,
                         col,
@@ -117,24 +113,18 @@ pub fn hungarian<T, D, S>(
                 }
                 None => {
                     let mut current = (row, col);
-                    // a vertical star is an unpathed star
-                    assignments.iter_mut().for_each(|a| {
-                        if a.status == AllocationStatus::Horizontal {
-                            a.status = AllocationStatus::Vertical;
-                        }
-                    });
-
                     // add the starting position as a new star
                     assignments.push(Allocation {
                         row,
                         col,
-                        status: AllocationStatus::Horizontal,
+                        status: AllocationStatus::Star,
                     });
 
-                    while let Some(star_index) = assignments
-                        .iter()
-                        .position(|a| a.status == AllocationStatus::Vertical && a.col == current.1)
-                    {
+                    while let Some(star_index) = assignments.iter().position(|a| {
+                        a.status == AllocationStatus::Star
+                            && a.col == current.1
+                            && a.row != current.0
+                    }) {
                         let star = assignments.remove(star_index);
                         current.0 = star.row;
 
@@ -143,13 +133,17 @@ pub fn hungarian<T, D, S>(
                             .find(|a| a.status == AllocationStatus::Prime && a.row == current.0)
                             .expect("known");
 
-                        prime.status = AllocationStatus::Horizontal;
+                        prime.status = AllocationStatus::Star;
                         current.1 = prime.col;
                     }
 
                     assignments.retain(|a| a.status != AllocationStatus::Prime);
-                    assignments.iter_mut().for_each(|a| {
-                        a.status = AllocationStatus::Vertical;
+                    covered_rows.fill(false);
+                    covered_cols.fill(false);
+                    assignments.iter().for_each(|a| {
+                        if a.status == AllocationStatus::Star {
+                            covered_cols[a.col] = true;
+                        }
                     });
                 }
             }
@@ -160,7 +154,7 @@ pub fn hungarian<T, D, S>(
         if assignments
             .iter()
             .filter(|d| match d.status {
-                AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
+                AllocationStatus::Star => true,
                 AllocationStatus::Prime => false,
             })
             .count()
@@ -171,19 +165,12 @@ pub fn hungarian<T, D, S>(
 
         let mut min = <T as num_traits::Bounded>::max_value();
         for col in 0..w {
-            if assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => a.col == col,
-                // we have already checked this condition
-                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
-            }) {
+            if covered_cols[col] {
                 continue;
             }
 
             for row in 0..h {
-                if assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => false,
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
-                }) {
+                if covered_rows[row] {
                     continue;
                 }
 
@@ -196,28 +183,21 @@ pub fn hungarian<T, D, S>(
 
         // subtract min from all uncovered rows
         costs.row_iter_mut().enumerate().for_each(|(i, mut r)| {
-            if !assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => false,
-                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == i,
-            }) {
+            if !covered_rows[i] {
                 r.add_scalar_mut(-min)
             }
         });
 
         // add min to all covered columns
         costs.column_iter_mut().enumerate().for_each(|(i, mut c)| {
-            if assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => a.col == i,
-                // we have already checked this condition
-                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
-            }) {
+            if covered_cols[i] {
                 c.add_scalar_mut(min);
             }
         });
     }
 
     assignments.retain(|a| match a.status {
-        AllocationStatus::Vertical | AllocationStatus::Horizontal => true,
+        AllocationStatus::Star => true,
         AllocationStatus::Prime => false,
     });
 }
