@@ -56,19 +56,18 @@ pub fn hungarian<T, D, S>(
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
-    for row in 0..h {
-        for col in 0..w {
-            if assignments.iter().any(|a: &Allocation| a.col == col) {
+    for col in 0..w {
+        for row in 0..h {
+            if assignments.iter().any(|a: &Allocation| a.row == row) {
                 continue;
             }
-
             if costs[(row, col)].is_zero() {
                 assignments.push(Allocation {
                     row,
                     col,
                     status: AllocationStatus::Vertical,
                 });
-                // breaks such that no more values are checked on this row
+                // breaks such that no more values are checked on this column
                 break;
             }
         }
@@ -76,24 +75,24 @@ pub fn hungarian<T, D, S>(
 
     // find all non-starred zeros and prime them
     'outer: loop {
-        for row in 0..h {
-            // if a prime exists in this row, it is covered
+        for col in 0..w {
             if assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => false,
-                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
+                AllocationStatus::Vertical => a.col == col,
+                // we have already checked this condition
+                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
             }) {
                 continue;
             }
 
-            for col in 0..w {
-                // if a star not covered by a prime exists on this column, skip
+            for row in 0..h {
+                // if a prime exists in this row, it is covered
                 if assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => a.col == col,
-                    // we have already checked this condition
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
+                    AllocationStatus::Vertical => false,
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
                 }) {
                     continue;
                 }
+                // if a star not covered by a prime exists on this column, skip
 
                 // check if this value is zero
                 if costs[(row, col)].is_zero() {
@@ -169,19 +168,19 @@ pub fn hungarian<T, D, S>(
         }
 
         let mut min = <T as num_traits::Bounded>::max_value();
-        for row in 0..h {
+        for col in 0..w {
             if assignments.iter().any(|a| match a.status {
-                AllocationStatus::Vertical => false,
-                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
+                AllocationStatus::Vertical => a.col == col,
+                // we have already checked this condition
+                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
             }) {
                 continue;
             }
 
-            for col in 0..w {
+            for row in 0..h {
                 if assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => a.col == col,
-                    // we have already checked this condition
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
+                    AllocationStatus::Vertical => false,
+                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
                 }) {
                     continue;
                 }
@@ -194,8 +193,8 @@ pub fn hungarian<T, D, S>(
             }
         }
 
-        for row in 0..h {
-            for col in 0..w {
+        for col in 0..w {
+            for row in 0..h {
                 let covered_row = assignments.iter().any(|a| match a.status {
                     AllocationStatus::Vertical => false,
                     AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
