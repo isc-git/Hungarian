@@ -74,8 +74,9 @@ pub fn hungarian<T, D, S>(
     }
 
     // find all non-starred zeros and prime them
-    'outer: loop {
-        for col in 0..w {
+    loop {
+        let mut uncovered_zero = None;
+        'zero_finder: for col in 0..w {
             if assignments.iter().any(|a| match a.status {
                 AllocationStatus::Vertical => a.col == col,
                 // we have already checked this condition
@@ -92,67 +93,68 @@ pub fn hungarian<T, D, S>(
                 }) {
                     continue;
                 }
-                // if a star not covered by a prime exists on this column, skip
 
                 // check if this value is zero
                 if costs[(row, col)].is_zero() {
-                    // found an uncovered zero
-
-                    match assignments.iter().position(|a| match a.status {
-                        AllocationStatus::Vertical | AllocationStatus::Horizontal => a.row == row,
-                        AllocationStatus::Prime => false,
-                    }) {
-                        Some(star) => {
-                            assignments[star].status = AllocationStatus::Horizontal;
-                            assignments.push(Allocation {
-                                row,
-                                col,
-                                status: AllocationStatus::Prime,
-                            });
-                        }
-                        None => {
-                            let mut current = (row, col);
-                            // a vertical star is an unpathed star
-                            assignments.iter_mut().for_each(|a| {
-                                if a.status == AllocationStatus::Horizontal {
-                                    a.status = AllocationStatus::Vertical;
-                                }
-                            });
-
-                            // add the starting position as a new star
-                            assignments.push(Allocation {
-                                row,
-                                col,
-                                status: AllocationStatus::Horizontal,
-                            });
-
-                            while let Some(star_index) = assignments.iter().position(|a| {
-                                a.status == AllocationStatus::Vertical && a.col == current.1
-                            }) {
-                                let star = assignments.remove(star_index);
-                                current.0 = star.row;
-
-                                let prime = assignments
-                                    .iter_mut()
-                                    .find(|a| {
-                                        a.status == AllocationStatus::Prime && a.row == current.0
-                                    })
-                                    .expect("known");
-
-                                prime.status = AllocationStatus::Horizontal;
-                                current.1 = prime.col;
-                            }
-
-                            assignments.retain(|a| a.status != AllocationStatus::Prime);
-                            assignments.iter_mut().for_each(|a| {
-                                a.status = AllocationStatus::Vertical;
-                            });
-                        }
-                    }
-
-                    continue 'outer;
+                    uncovered_zero = Some((row, col));
+                    break 'zero_finder;
                 }
             }
+        }
+
+        if let Some((row, col)) = uncovered_zero {
+            match assignments.iter().position(|a| match a.status {
+                AllocationStatus::Vertical | AllocationStatus::Horizontal => a.row == row,
+                AllocationStatus::Prime => false,
+            }) {
+                Some(star) => {
+                    assignments[star].status = AllocationStatus::Horizontal;
+                    assignments.push(Allocation {
+                        row,
+                        col,
+                        status: AllocationStatus::Prime,
+                    });
+                }
+                None => {
+                    let mut current = (row, col);
+                    // a vertical star is an unpathed star
+                    assignments.iter_mut().for_each(|a| {
+                        if a.status == AllocationStatus::Horizontal {
+                            a.status = AllocationStatus::Vertical;
+                        }
+                    });
+
+                    // add the starting position as a new star
+                    assignments.push(Allocation {
+                        row,
+                        col,
+                        status: AllocationStatus::Horizontal,
+                    });
+
+                    while let Some(star_index) = assignments
+                        .iter()
+                        .position(|a| a.status == AllocationStatus::Vertical && a.col == current.1)
+                    {
+                        let star = assignments.remove(star_index);
+                        current.0 = star.row;
+
+                        let prime = assignments
+                            .iter_mut()
+                            .find(|a| a.status == AllocationStatus::Prime && a.row == current.0)
+                            .expect("known");
+
+                        prime.status = AllocationStatus::Horizontal;
+                        current.1 = prime.col;
+                    }
+
+                    assignments.retain(|a| a.status != AllocationStatus::Prime);
+                    assignments.iter_mut().for_each(|a| {
+                        a.status = AllocationStatus::Vertical;
+                    });
+                }
+            }
+
+            continue;
         }
 
         if assignments
@@ -189,30 +191,29 @@ pub fn hungarian<T, D, S>(
                 if curr < min {
                     min = curr;
                 }
-                //min = min.min(curr);
             }
         }
 
-        for col in 0..w {
-            for row in 0..h {
-                let covered_row = assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => false,
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == row,
-                });
-
-                let covered_col = assignments.iter().any(|a| match a.status {
-                    AllocationStatus::Vertical => a.col == col,
-                    // we have already checked this condition
-                    AllocationStatus::Horizontal | AllocationStatus::Prime => false,
-                });
-
-                match (covered_row, covered_col) {
-                    (true, true) => costs[(row, col)] += min,
-                    (true, false) | (false, true) => {}
-                    (false, false) => costs[(row, col)] -= min,
-                }
+        // subtract min from all uncovered rows
+        costs.row_iter_mut().enumerate().for_each(|(i, mut r)| {
+            if !assignments.iter().any(|a| match a.status {
+                AllocationStatus::Vertical => false,
+                AllocationStatus::Horizontal | AllocationStatus::Prime => a.row == i,
+            }) {
+                r.add_scalar_mut(-min)
             }
-        }
+        });
+
+        // add min to all covered columns
+        costs.column_iter_mut().enumerate().for_each(|(i, mut c)| {
+            if assignments.iter().any(|a| match a.status {
+                AllocationStatus::Vertical => a.col == i,
+                // we have already checked this condition
+                AllocationStatus::Horizontal | AllocationStatus::Prime => false,
+            }) {
+                c.add_scalar_mut(min);
+            }
+        });
     }
 
     assignments.retain(|a| match a.status {
