@@ -9,6 +9,7 @@ bench = false
 
 [dependencies]
 nalgebra = { version = "0.33.0" }
+num-traits = "0.2.19"
 
 [dev-dependencies]
 criterion = "0.5.1"

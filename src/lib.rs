@@ -24,7 +24,19 @@ pub fn hungarian<T, D, S>(
     costs: &mut nalgebra::SquareMatrix<T, D, S>,
     assignments: &mut Vec<Allocation>,
 ) where
-    T: nalgebra::RealField + std::ops::Sub<T, Output = T> + Copy,
+    T: std::ops::Sub<T, Output = T>
+        + Copy
+        + nalgebra::SimdValue<Element = T>
+        + nalgebra::SimdPartialOrd
+        + num_traits::bounds::Bounded
+        + num_traits::Zero
+        + std::ops::SubAssign
+        + std::ops::AddAssign
+        + std::fmt::Debug
+        + std::ops::Neg<Output = T>
+        + PartialEq
+        + PartialOrd
+        + 'static,
     D: nalgebra::Dim,
     S: nalgebra::RawStorage<T, D, D> + RawStorageMut<T, D, D>,
 {
@@ -50,7 +62,7 @@ pub fn hungarian<T, D, S>(
                 continue;
             }
 
-            if costs[(row, col)].abs() < T::default_epsilon() {
+            if costs[(row, col)].is_zero() {
                 assignments.push(Allocation {
                     row,
                     col,
@@ -84,7 +96,7 @@ pub fn hungarian<T, D, S>(
                 }
 
                 // check if this value is zero
-                if costs[(row, col)].abs() < T::default_epsilon() {
+                if costs[(row, col)].is_zero() {
                     // found an uncovered zero
 
                     match assignments.iter().position(|a| match a.status {
@@ -156,7 +168,7 @@ pub fn hungarian<T, D, S>(
             break;
         }
 
-        let mut min = T::max_value().expect("real value has maximum");
+        let mut min = <T as num_traits::Bounded>::max_value();
         for row in 0..h {
             if assignments.iter().any(|a| match a.status {
                 AllocationStatus::Vertical => false,
@@ -174,7 +186,11 @@ pub fn hungarian<T, D, S>(
                     continue;
                 }
 
-                min = min.min(costs[(row, col)]);
+                let curr = costs[(row, col)];
+                if curr < min {
+                    min = curr;
+                }
+                //min = min.min(curr);
             }
         }
 

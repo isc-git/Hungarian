@@ -37,5 +37,25 @@ pub fn random_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, standard_benchmark, random_benchmarks);
+pub fn random_benchmarks_i32(c: &mut Criterion) {
+    let mut group = c.benchmark_group("random_i32_of_size");
+    for size in (1..7).map(|i| 2usize.pow(i)) {
+        let mut assignments = Vec::with_capacity(size);
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_batched_ref(
+                || nalgebra::DMatrix::<i32>::new_random(size, size),
+                |costs| hungarian(black_box(costs), black_box(&mut assignments)),
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    standard_benchmark,
+    random_benchmarks,
+    random_benchmarks_i32
+);
 criterion_main!(benches);
