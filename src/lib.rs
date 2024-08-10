@@ -204,7 +204,7 @@ pub fn hungarian<T, D, S>(
 
 #[cfg(test)]
 mod test {
-    use nalgebra::{Dim, Matrix, Matrix2, Matrix4, Matrix5, RawStorage};
+    use nalgebra::{Dim, Matrix, Matrix2, Matrix3, Matrix4, Matrix5, RawStorage};
 
     use super::*;
 
@@ -226,6 +226,25 @@ mod test {
             - cost_expected)
             .abs()
             < epsilon
+    }
+
+    #[test]
+    fn null() {
+        #[rustfmt::skip]
+        let costs = nalgebra::DMatrix::<f64>::from_row_slice(0, 0, &[]);
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        assert!(assignments.is_empty());
+    }
+
+    #[test]
+    fn unary() {
+        #[rustfmt::skip]
+        let costs = nalgebra::DMatrix::<f64>::from_row_slice(1, 1, &[1.]);
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        assert!(assignments.len() == 1);
+        assert!(assignments[0].assignment() == (0, 0));
     }
 
     #[test]
@@ -291,6 +310,27 @@ mod test {
     }
 
     #[test]
+    fn wikipedia_three() {
+        #[rustfmt::skip]
+        let costs = Matrix3::from_row_slice(
+            &[
+                8., 5., 9.,
+                4., 2., 4.,
+                7., 3., 8., 
+            ]
+        );
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        let expected_cost = 15.;
+        assert!(assert_costs(
+            &costs,
+            &assignments,
+            expected_cost,
+            f64::EPSILON
+        ));
+    }
+
+    #[test]
     fn basic_five() {
         #[rustfmt::skip]
         let costs = Matrix5::from_row_slice(
@@ -314,6 +354,27 @@ mod test {
     }
 
     #[test]
+    fn another_three() {
+        #[rustfmt::skip]
+        let costs = Matrix3::from_row_slice(
+            &[
+                10., 6., 9.,
+                 5., 7., 8.,
+                 9., 8., 5.,
+            ]
+        );
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        let expected_cost = 16.;
+        assert!(assert_costs(
+            &costs,
+            &assignments,
+            expected_cost,
+            f64::EPSILON
+        ));
+    }
+
+    #[test]
     fn basic_five_2() {
         #[rustfmt::skip]
         let costs = Matrix5::from_row_slice(
@@ -328,6 +389,50 @@ mod test {
         let mut assignments = Vec::with_capacity(costs.shape().1);
         hungarian(&mut costs.clone(), &mut assignments);
         let expected_cost = 86.;
+        assert!(assert_costs(
+            &costs,
+            &assignments,
+            expected_cost,
+            f64::EPSILON
+        ));
+    }
+
+    #[test]
+    fn another_four() {
+        #[rustfmt::skip]
+        let costs = Matrix4::from_row_slice(
+            &[
+                20., 15., 19., 25.,
+                25., 18., 17., 23.,
+                22., 23., 21., 24.,
+                28., 17., 24., 24.,
+            ]
+        );
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        let expected_cost = 78.;
+        assert!(assert_costs(
+            &costs,
+            &assignments,
+            expected_cost,
+            f64::EPSILON
+        ));
+    }
+
+    #[test]
+    fn y12() {
+        #[rustfmt::skip]
+        let costs = Matrix4::from_row_slice(
+            &[
+                12., 14., 74., 68.,
+                10., 79., 73., 75.,
+                92.,  9., 61., 34.,
+                28., 84., 79., 81.,
+            ]
+        );
+        let mut assignments = Vec::with_capacity(costs.shape().1);
+        hungarian(&mut costs.clone(), &mut assignments);
+        let expected_cost = 137.;
         assert!(assert_costs(
             &costs,
             &assignments,
