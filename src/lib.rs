@@ -1,17 +1,13 @@
 use nalgebra::RawStorageMut;
 
-#[derive(Debug, Clone, PartialEq)]
-enum AllocationStatus {
-    Star,
-    Prime,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Allocations {
     row: Vec<usize>,
     col: Vec<usize>,
     row_prime: Vec<usize>,
     col_prime: Vec<usize>,
+    covered_rows: Vec<bool>,
+    covered_cols: Vec<bool>,
 }
 
 impl Allocations {
@@ -25,6 +21,8 @@ impl Allocations {
         self.col.clear();
         self.row_prime.clear();
         self.col_prime.clear();
+        self.covered_rows.clear();
+        self.covered_cols.clear();
     }
 
     #[inline(always)]
@@ -76,8 +74,8 @@ pub fn hungarian<T, D, S>(
 {
     let (h, w) = costs.shape();
     assignments.clear();
-    let mut covered_rows = vec![false; h];
-    let mut covered_cols = vec![false; w];
+    assignments.covered_rows.resize(h, false);
+    assignments.covered_cols.resize(w, false);
 
     // subtract minimum value from each respective row
     costs.row_iter_mut().for_each(|mut r| {
@@ -99,7 +97,7 @@ pub fn hungarian<T, D, S>(
             }
 
             if costs[(row, col)].is_zero() {
-                covered_cols[col] = true;
+                assignments.covered_cols[col] = true;
                 assignments.submit_star(row, col);
                 // breaks such that no more values are checked on this column
                 break;
@@ -111,12 +109,12 @@ pub fn hungarian<T, D, S>(
     loop {
         let mut uncovered_zero = None;
         'zero_finder: for col in 0..w {
-            if covered_cols[col] {
+            if assignments.covered_cols[col] {
                 continue;
             }
 
             for row in 0..h {
-                if covered_rows[row] {
+                if assignments.covered_rows[row] {
                     continue;
                 }
 
@@ -131,14 +129,13 @@ pub fn hungarian<T, D, S>(
         if let Some((row, col)) = uncovered_zero {
             match assignments.row.iter().enumerate().find(|(_, r)| row == **r) {
                 Some((star_index, star_row)) => {
-                    covered_cols[assignments.col[star_index]] = false;
-                    covered_rows[*star_row] = true;
+                    assignments.covered_cols[assignments.col[star_index]] = false;
+                    assignments.covered_rows[*star_row] = true;
                     assignments.submit_prime(row, col)
                 }
                 None => {
                     let mut current = (row, col);
                     let mut to_add = current;
-                    // add the starting position as a new star
                     while let Some(star_index) =
                         assignments.col.iter().position(|col| *col == current.1)
                     {
@@ -154,19 +151,18 @@ pub fn hungarian<T, D, S>(
                             .expect("known");
 
                         let (_, prime_col) = assignments.remove_prime(prime_index);
-                        //assignments.submit_star(prime_row, prime_col);
                         current.1 = prime_col;
                         to_add = current
                     }
 
                     assignments.submit_star(to_add.0, to_add.1);
 
-                    covered_rows.fill(false);
-                    covered_cols.fill(false);
+                    assignments.covered_rows.fill(false);
+                    assignments.covered_cols.fill(false);
                     assignments.row_prime.clear();
                     assignments.col_prime.clear();
                     for assigned_col in assignments.col.iter() {
-                        covered_cols[*assigned_col] = true;
+                        assignments.covered_cols[*assigned_col] = true;
                     }
                 }
             }
@@ -180,32 +176,29 @@ pub fn hungarian<T, D, S>(
 
         let mut min = <T as num_traits::Bounded>::max_value();
         for col in 0..w {
-            if covered_cols[col] {
+            if assignments.covered_cols[col] {
                 continue;
             }
 
             for row in 0..h {
-                if covered_rows[row] {
+                if assignments.covered_rows[row] {
                     continue;
                 }
 
-                let curr = costs[(row, col)];
-                if curr < min {
-                    min = curr;
-                }
+                min = min.simd_min(costs[(row, col)]);
             }
         }
 
         // subtract min from all uncovered rows
         costs.row_iter_mut().enumerate().for_each(|(i, mut r)| {
-            if !covered_rows[i] {
+            if !assignments.covered_rows[i] {
                 r.add_scalar_mut(-min)
             }
         });
 
         // add min to all covered columns
         costs.column_iter_mut().enumerate().for_each(|(i, mut c)| {
-            if covered_cols[i] {
+            if assignments.covered_cols[i] {
                 c.add_scalar_mut(min);
             }
         });
