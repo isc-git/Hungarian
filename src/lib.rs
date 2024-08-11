@@ -1,16 +1,18 @@
 use nalgebra::RawStorageMut;
 
 #[derive(Debug, Clone, Default)]
-pub struct Allocations {
+pub struct Allocations<T> {
     row: Vec<usize>,
     col: Vec<usize>,
     row_prime: Vec<usize>,
     col_prime: Vec<usize>,
     covered_rows: Vec<bool>,
     covered_cols: Vec<bool>,
+    rows_offsets: Vec<T>,
+    cols_offsets: Vec<T>,
 }
 
-impl Allocations {
+impl<T> Allocations<T> {
     pub fn assignment(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.row.iter().cloned().zip(self.col.iter().cloned())
     }
@@ -52,10 +54,8 @@ impl Allocations {
     }
 }
 
-pub fn hungarian<T, D, S>(
-    costs: &mut nalgebra::SquareMatrix<T, D, S>,
-    assignments: &mut Allocations,
-) where
+pub fn hungarian<T, D, S>(costs: &nalgebra::SquareMatrix<T, D, S>, assignments: &mut Allocations<T>)
+where
     T: std::ops::Sub<T, Output = T>
         + Copy
         + nalgebra::SimdValue<Element = T>
@@ -77,16 +77,25 @@ pub fn hungarian<T, D, S>(
     assignments.covered_rows.resize(h, false);
     assignments.covered_cols.resize(w, false);
 
+    assignments.rows_offsets.clear();
+    assignments.rows_offsets.resize(h, T::zero());
+    assignments.cols_offsets.clear();
+    assignments.cols_offsets.resize(w, T::zero());
+
     // subtract minimum value from each respective row
-    costs.row_iter_mut().for_each(|mut r| {
+    costs.row_iter().enumerate().for_each(|(i, r)| {
         let min = r.min();
-        r.add_scalar_mut(-min)
+        assignments.rows_offsets[i] = min;
     });
 
     // subtract minimum value from each respective col
-    costs.column_iter_mut().for_each(|mut c| {
-        let min = c.min();
-        c.add_scalar_mut(-min);
+    costs.column_iter().enumerate().for_each(|(i, c)| {
+        let mut min = T::max_value();
+        for r in 0..h {
+            min = min.simd_min(c[r] - assignments.rows_offsets[r]);
+        }
+
+        assignments.cols_offsets[i] = min;
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
@@ -96,7 +105,9 @@ pub fn hungarian<T, D, S>(
                 continue;
             }
 
-            if costs[(row, col)].is_zero() {
+            if (costs[(row, col)] - assignments.rows_offsets[row] - assignments.cols_offsets[col])
+                .is_zero()
+            {
                 assignments.covered_cols[col] = true;
                 assignments.submit_star(row, col);
                 // breaks such that no more values are checked on this column
@@ -119,7 +130,11 @@ pub fn hungarian<T, D, S>(
                 }
 
                 // check if this value is zero
-                if costs[(row, col)].is_zero() {
+                if (costs[(row, col)]
+                    - assignments.rows_offsets[row]
+                    - assignments.cols_offsets[col])
+                    .is_zero()
+                {
                     uncovered_zero = Some((row, col));
                     break 'zero_finder;
                 }
@@ -185,23 +200,27 @@ pub fn hungarian<T, D, S>(
                     continue;
                 }
 
-                min = min.simd_min(costs[(row, col)]);
+                min = min.simd_min(
+                    costs[(row, col)]
+                        - assignments.rows_offsets[row]
+                        - assignments.cols_offsets[col],
+                );
             }
         }
 
         // subtract min from all uncovered rows
-        costs.row_iter_mut().enumerate().for_each(|(i, mut r)| {
+        for i in 0..h {
             if !assignments.covered_rows[i] {
-                r.add_scalar_mut(-min)
+                assignments.rows_offsets[i] += min;
             }
-        });
+        }
 
         // add min to all covered columns
-        costs.column_iter_mut().enumerate().for_each(|(i, mut c)| {
+        for i in 0..w {
             if assignments.covered_cols[i] {
-                c.add_scalar_mut(min);
+                assignments.cols_offsets[i] -= min;
             }
-        });
+        }
     }
 }
 
@@ -213,7 +232,7 @@ mod test {
 
     fn assert_costs<R, C, S>(
         costs: &Matrix<f64, R, C, S>,
-        assignments: &Allocations,
+        assignments: &Allocations<f64>,
         cost_expected: f64,
         epsilon: f64,
     ) -> bool
