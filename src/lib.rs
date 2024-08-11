@@ -4,8 +4,7 @@ use nalgebra::RawStorageMut;
 pub struct Allocations<T> {
     row: Vec<usize>,
     col: Vec<usize>,
-    row_prime: Vec<usize>,
-    col_prime: Vec<usize>,
+    prime: Vec<usize>,
     covered_rows: Vec<bool>,
     covered_cols: Vec<bool>,
     rows_offsets: Vec<T>,
@@ -21,8 +20,6 @@ impl<T> Allocations<T> {
     pub fn clear(&mut self) {
         self.row.clear();
         self.col.clear();
-        self.row_prime.clear();
-        self.col_prime.clear();
         self.covered_rows.clear();
         self.covered_cols.clear();
     }
@@ -35,8 +32,7 @@ impl<T> Allocations<T> {
 
     #[inline(always)]
     pub fn submit_prime(&mut self, row: usize, col: usize) {
-        self.row_prime.push(row);
-        self.col_prime.push(col);
+        self.prime[row] = col;
     }
 
     #[inline(always)]
@@ -69,6 +65,9 @@ where
     assignments.clear();
     assignments.covered_rows.resize(h, false);
     assignments.covered_cols.resize(w, false);
+
+    // reset primes
+    assignments.prime.resize(h, 0);
 
     assignments.rows_offsets.clear();
     assignments.rows_offsets.resize(h, T::zero());
@@ -151,13 +150,7 @@ where
                         current.0 = star_row;
                         assignments.submit_star(to_add.0, to_add.1);
 
-                        let prime_index = assignments
-                            .row_prime
-                            .iter()
-                            .position(|row| *row == current.0)
-                            .expect("known");
-
-                        let prime_col = assignments.col_prime[prime_index];
+                        let prime_col = assignments.prime[current.0];
                         current.1 = prime_col;
                         to_add = current
                     }
@@ -166,8 +159,6 @@ where
 
                     assignments.covered_rows.fill(false);
                     assignments.covered_cols.fill(false);
-                    assignments.row_prime.clear();
-                    assignments.col_prime.clear();
                     for assigned_col in assignments.col.iter() {
                         assignments.covered_cols[*assigned_col] = true;
                     }
