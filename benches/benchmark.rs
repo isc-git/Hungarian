@@ -18,13 +18,13 @@ pub fn standard_benchmark(c: &mut Criterion) {
     let mut assignments = Allocations::default();
 
     c.bench_function("hungarian", |b| {
-        b.iter(|| hungarian(black_box(&mut costs.clone()), black_box(&mut assignments)))
+        b.iter(|| hungarian(black_box(&costs), black_box(&mut assignments)))
     });
 }
 
 pub fn random_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("random_of_size");
-    for size in (1..7).map(|i| 2usize.pow(i)) {
+    for size in (1..8).map(|i| 2usize.pow(i)) {
         let mut assignments = Allocations::default();
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
