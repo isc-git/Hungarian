@@ -45,13 +45,6 @@ impl<T> Allocations<T> {
         let col = self.col.remove(i);
         (row, col)
     }
-
-    #[inline(always)]
-    fn remove_prime(&mut self, i: usize) -> (usize, usize) {
-        let row = self.row_prime.remove(i);
-        let col = self.col_prime.remove(i);
-        (row, col)
-    }
 }
 
 pub fn hungarian<T, D, S>(costs: &nalgebra::SquareMatrix<T, D, S>, assignments: &mut Allocations<T>)
@@ -158,14 +151,13 @@ where
                         current.0 = star_row;
                         assignments.submit_star(to_add.0, to_add.1);
 
-                        let (prime_index, _) = assignments
+                        let prime_index = assignments
                             .row_prime
                             .iter()
-                            .enumerate()
-                            .find(|(_, row)| **row == current.0)
+                            .position(|row| *row == current.0)
                             .expect("known");
 
-                        let (_, prime_col) = assignments.remove_prime(prime_index);
+                        let prime_col = assignments.col_prime[prime_index];
                         current.1 = prime_col;
                         to_add = current
                     }
