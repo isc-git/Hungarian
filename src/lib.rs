@@ -69,9 +69,7 @@ where
     // reset primes
     assignments.prime.resize(h, 0);
 
-    assignments.rows_offsets.clear();
     assignments.rows_offsets.resize(h, T::zero());
-    assignments.cols_offsets.clear();
     assignments.cols_offsets.resize(w, T::zero());
 
     // subtract minimum value from each respective row
@@ -91,9 +89,13 @@ where
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
-    for col in 0..w {
-        for row in 0..h {
-            if assignments.row.contains(&row) {
+    for row in 0..h {
+        if assignments.row.contains(&row) {
+            continue;
+        }
+
+        for col in 0..w {
+            if assignments.covered_cols[col] {
                 continue;
             }
 
