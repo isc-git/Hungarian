@@ -99,9 +99,7 @@ where
                 continue;
             }
 
-            if (costs[(row, col)] - assignments.rows_offsets[row] - assignments.cols_offsets[col])
-                .is_zero()
-            {
+            if costs[(row, col)] <= assignments.rows_offsets[row] + assignments.cols_offsets[col] {
                 assignments.covered_cols[col] = true;
                 assignments.submit_star(row, col);
                 // breaks such that no more values are checked on this column
@@ -110,8 +108,8 @@ where
         }
     }
 
-    // find all non-starred zeros and prime them
     loop {
+        // find an uncovered zero
         let mut uncovered_zero = None;
         'zero_finder: for col in 0..w {
             if assignments.covered_cols[col] {
@@ -124,10 +122,8 @@ where
                 }
 
                 // check if this value is zero
-                if (costs[(row, col)]
-                    - assignments.rows_offsets[row]
-                    - assignments.cols_offsets[col])
-                    .is_zero()
+                if costs[(row, col)]
+                    <= assignments.rows_offsets[row] + assignments.cols_offsets[col]
                 {
                     uncovered_zero = Some((row, col));
                     break 'zero_finder;
@@ -174,6 +170,7 @@ where
             break;
         }
 
+        // determine the minimum of non-covered elements
         let mut min = <T as num_traits::Bounded>::max_value();
         for col in 0..w {
             if assignments.covered_cols[col] {
@@ -211,7 +208,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use nalgebra::{Dim, Matrix, Matrix2, Matrix3, Matrix4, Matrix5, RawStorage};
+    use nalgebra::{DMatrix, Dim, Matrix, Matrix2, Matrix3, Matrix4, Matrix5, RawStorage};
 
     use super::*;
 
@@ -240,7 +237,7 @@ mod test {
         #[rustfmt::skip]
         let costs = nalgebra::DMatrix::<f64>::from_row_slice(0, 0, &[]);
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         assert!(assignments.assignment().collect::<Vec<_>>().is_empty());
     }
 
@@ -249,7 +246,7 @@ mod test {
         #[rustfmt::skip]
         let costs = nalgebra::DMatrix::<f64>::from_row_slice(1, 1, &[1.]);
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let assignments = assignments.assignment().collect::<Vec<_>>();
         assert!(assignments.len() == 1);
         assert!(assignments[0] == (0, 0));
@@ -265,7 +262,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 2.;
         assert!(assert_costs(
             &costs,
@@ -285,7 +282,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 4.;
         assert!(assert_costs(
             &costs,
@@ -307,7 +304,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 140.;
         assert!(assert_costs(
             &costs,
@@ -328,7 +325,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 15.;
         assert!(assert_costs(
             &costs,
@@ -351,7 +348,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 23.;
         assert!(assert_costs(
             &costs,
@@ -372,7 +369,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 16.;
         assert!(assert_costs(
             &costs,
@@ -395,7 +392,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 86.;
         assert!(assert_costs(
             &costs,
@@ -417,7 +414,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 78.;
         assert!(assert_costs(
             &costs,
@@ -425,6 +422,29 @@ mod test {
             expected_cost,
             f64::EPSILON
         ));
+    }
+
+    #[test]
+    fn another_four_int() {
+        #[rustfmt::skip]
+        let costs = Matrix4::from_row_slice(
+            &[
+                20, 15, 19, 25,
+                25, 18, 17, 23,
+                22, 23, 21, 24,
+                28, 17, 24, 24,
+            ]
+        );
+        let mut assignments = Allocations::default();
+        hungarian(&costs, &mut assignments);
+        let expected_cost = 78;
+        assert_eq!(
+            assignments
+                .assignment()
+                .map(|a| costs.get(a).expect("within cost bounds"))
+                .sum::<i32>(),
+            expected_cost
+        );
     }
 
     #[test]
@@ -439,7 +459,7 @@ mod test {
             ]
         );
         let mut assignments = Allocations::default();
-        hungarian(&mut costs.clone(), &mut assignments);
+        hungarian(&costs, &mut assignments);
         let expected_cost = 137.;
         assert!(assert_costs(
             &costs,
@@ -447,5 +467,86 @@ mod test {
             expected_cost,
             f64::EPSILON
         ));
+    }
+
+    #[test]
+    fn y12_int() {
+        #[rustfmt::skip]
+        let costs = Matrix4::from_row_slice(
+            &[
+                12, 14, 74, 68,
+                10, 79, 73, 75,
+                92,  9, 61, 34,
+                28, 84, 79, 81,
+            ]
+        );
+        let mut assignments = Allocations::default();
+        hungarian(&costs, &mut assignments);
+        let expected_cost = 137;
+        assert_eq!(
+            assignments
+                .assignment()
+                .map(|a| costs.get(a).expect("within cost bounds"))
+                .sum::<i32>(),
+            expected_cost
+        );
+    }
+
+    // adapted from https://github.com/nwtnni/hungarian/tree/master to ensure valid
+    // benchmarking comparison
+    #[test]
+    fn test_worst_case() {
+        let mut costs = DMatrix::zeros(4, 4);
+        let (rows, columns) = costs.shape();
+        for col in 0..columns {
+            for row in 0..rows {
+                costs[(row, col)] = ((row + 1) * (col + 1)) as i32;
+            }
+        }
+        let mut assignments = Allocations::default();
+        hungarian(&costs, &mut assignments);
+        let expected_cost = 20;
+        assert_eq!(
+            assignments
+                .assignment()
+                .map(|a| costs.get(a).expect("within cost bounds"))
+                .sum::<i32>(),
+            expected_cost
+        );
+    }
+    // found https://github.com/nwtnni/hungarian/blob/master/src/lib.rs
+    // originally from https://stackoverflow.com/questions/26893961/cannot-solve-hungarian-algorithm
+    #[test]
+    fn cannot_solve() {
+        #[rustfmt::skip]
+        let costs = DMatrix::from_row_slice(14, 14,
+            &[
+                  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0,
+                 53, 207, 256, 207, 231, 348, 348, 348, 231, 244, 244, 0, 0, 0,
+                240,  33,  67,  33,  56, 133, 133, 133,  56,  33,  33, 0, 0, 0,
+                460, 107, 200, 107, 122, 324, 324, 324, 122,  33,  33, 0, 0, 0,
+                167, 340, 396, 340, 422, 567, 567, 567, 422, 442, 442, 0, 0, 0,
+                167, 367, 307, 367, 433, 336, 336, 336, 433, 158, 158, 0, 0, 0,
+                160,  20,  37,  20,  31,  70,  70,  70,  31,  22,  22, 0, 0, 0,
+                200, 307, 393, 307, 222, 364, 364, 364, 222, 286, 286, 0, 0, 0,
+                 33, 153, 152, 153, 228, 252, 252, 252, 228,  78,  78, 0, 0, 0,
+                 93, 140, 185, 140,  58, 118, 118, 118,  58,  44,  44, 0, 0, 0,
+                  0,   7,  22,   7,  19,  58,  58,  58,  19,   0,   0, 0, 0, 0,
+                 67, 153, 241, 153, 128, 297, 297, 297, 128,  39,  39, 0, 0, 0,
+                 73, 253, 389, 253, 253, 539, 539, 539, 253,  36,  36, 0, 0, 0,
+                173, 267, 270, 267, 322, 352, 352, 352, 322, 231, 231, 0, 0, 0,
+            ]
+        );
+
+        let mut assignments = Allocations::default();
+        hungarian(&costs, &mut assignments);
+        let expected_cost = 828;
+        assert_eq!(
+            assignments
+                .assignment()
+                .map(|a| costs.get(a).expect("within cost bounds"))
+                .sum::<i32>(),
+            expected_cost
+        );
     }
 }

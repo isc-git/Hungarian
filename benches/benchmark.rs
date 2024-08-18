@@ -52,10 +52,35 @@ pub fn random_benchmarks_i32(c: &mut Criterion) {
     group.finish();
 }
 
+pub fn comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("comparison");
+
+    for size in &[5, 10, 25, 50] {
+        let mut assignments = Allocations::default();
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_batched_ref(
+                || {
+                    let mut costs = nalgebra::DMatrix::<i32>::zeros(*size, *size);
+                    for i in 0..*size {
+                        for j in 0..*size {
+                            costs[(i, j)] = ((i + 1) * (j + 1)) as i32;
+                        }
+                    }
+                    costs
+                },
+                |costs| hungarian(black_box(costs), black_box(&mut assignments)),
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     standard_benchmark,
     random_benchmarks,
-    random_benchmarks_i32
+    random_benchmarks_i32,
+    comparison,
 );
 criterion_main!(benches);
