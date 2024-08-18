@@ -8,11 +8,8 @@ fn main() {
     let mut total_cost = 0.;
     for _ in 0..N {
         let costs = nalgebra::DMatrix::<f64>::new_random(ASSIGNMENT_SIZE, ASSIGNMENT_SIZE);
-        hungarian::hungarian(&mut costs.clone(), &mut assignments);
-        total_cost += assignments
-            .assignment()
-            .map(|a| costs.get(a).expect("within cost bounds"))
-            .sum::<f64>();
+        hungarian::hungarian(&costs, &mut assignments);
+        total_cost += assignments.assignment().map(|a| costs[a]).sum::<f64>();
     }
 
     println!("total: {total_cost}");

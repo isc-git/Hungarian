@@ -1,7 +1,29 @@
+//! An implementation of the matrix intepretation of the Hungarian algorithm
+//! ```
+//! use hungarian::{Allocations, hungarian};
+//! use nalgebra::DMatrix;
+//!
+//! let mut assignments = Allocations::default();
+//! let costs = DMatrix::<i32>::from_row_slice(
+//!     3, 3,
+//!     &[
+//!         8, 4, 7,
+//!         5, 2, 3,
+//!         9, 4, 8,
+//!     ]
+//! );
+//!
+//! hungarian(&costs, &mut assignments);
+//! let cost = assignments.assignment().map(|i| costs[i]).sum::<i32>();
+//! # assert_eq!(cost, 15);
+//! ```
+//!
+
 use nalgebra::RawStorageMut;
 
 #[derive(Debug, Clone, Default)]
-pub struct Allocations<T> {
+/// retained buffers for repeated use by the algorithm
+pub struct Allocations<T: num_traits::Zero + Copy> {
     row: Vec<usize>,
     col: Vec<usize>,
     prime: Vec<usize>,
@@ -11,13 +33,14 @@ pub struct Allocations<T> {
     cols_offsets: Vec<T>,
 }
 
-impl<T> Allocations<T> {
+impl<T: num_traits::Zero + Copy> Allocations<T> {
+    /// returns an iterator of the assignments (row, column)
     pub fn assignment(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.row.iter().cloned().zip(self.col.iter().cloned())
     }
 
     #[inline(always)]
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.row.clear();
         self.col.clear();
         self.covered_rows.clear();
@@ -25,13 +48,22 @@ impl<T> Allocations<T> {
     }
 
     #[inline(always)]
-    pub fn submit_star(&mut self, row: usize, col: usize) {
+    fn resize(&mut self, size: usize) {
+        self.covered_rows.resize(size, false);
+        self.covered_cols.resize(size, false);
+        self.prime.resize(size, 0);
+        self.rows_offsets.resize(size, T::zero());
+        self.cols_offsets.resize(size, T::zero());
+    }
+
+    #[inline(always)]
+    fn submit_star(&mut self, row: usize, col: usize) {
         self.row.push(row);
         self.col.push(col);
     }
 
     #[inline(always)]
-    pub fn submit_prime(&mut self, row: usize, col: usize) {
+    fn submit_prime(&mut self, row: usize, col: usize) {
         self.prime[row] = col;
     }
 
@@ -43,6 +75,11 @@ impl<T> Allocations<T> {
     }
 }
 
+/// minimizes the cost of assigning N workers to N jobs
+///
+/// # Arguments
+/// - `costs`: cost matrix containing weights
+/// - `assignments`: stores the assignments, recovered with [Allocations::assignment]
 pub fn hungarian<T, D, S>(costs: &nalgebra::SquareMatrix<T, D, S>, assignments: &mut Allocations<T>)
 where
     T: std::ops::Sub<T, Output = T>
@@ -61,16 +98,9 @@ where
     D: nalgebra::Dim,
     S: nalgebra::RawStorage<T, D, D> + RawStorageMut<T, D, D>,
 {
-    let (h, w) = costs.shape();
+    let (size, _) = costs.shape();
     assignments.clear();
-    assignments.covered_rows.resize(h, false);
-    assignments.covered_cols.resize(w, false);
-
-    // reset primes
-    assignments.prime.resize(h, 0);
-
-    assignments.rows_offsets.resize(h, T::zero());
-    assignments.cols_offsets.resize(w, T::zero());
+    assignments.resize(size);
 
     // subtract minimum value from each respective row
     costs.row_iter().enumerate().for_each(|(i, r)| {
@@ -81,7 +111,7 @@ where
     // subtract minimum value from each respective col
     costs.column_iter().enumerate().for_each(|(i, c)| {
         let mut min = T::max_value();
-        for r in 0..h {
+        for r in 0..size {
             min = min.simd_min(c[r] - assignments.rows_offsets[r]);
         }
 
@@ -89,12 +119,8 @@ where
     });
 
     // try to assign abritrary zeroes on distinct rows and columns
-    for row in 0..h {
-        if assignments.row.contains(&row) {
-            continue;
-        }
-
-        for col in 0..w {
+    for row in 0..size {
+        for col in 0..size {
             if assignments.covered_cols[col] {
                 continue;
             }
@@ -102,7 +128,6 @@ where
             if costs[(row, col)] <= assignments.rows_offsets[row] + assignments.cols_offsets[col] {
                 assignments.covered_cols[col] = true;
                 assignments.submit_star(row, col);
-                // breaks such that no more values are checked on this column
                 break;
             }
         }
@@ -111,17 +136,16 @@ where
     loop {
         // find an uncovered zero
         let mut uncovered_zero = None;
-        'zero_finder: for col in 0..w {
+        'zero_finder: for col in 0..size {
             if assignments.covered_cols[col] {
                 continue;
             }
 
-            for row in 0..h {
+            for row in 0..size {
                 if assignments.covered_rows[row] {
                     continue;
                 }
 
-                // check if this value is zero
                 if costs[(row, col)]
                     <= assignments.rows_offsets[row] + assignments.cols_offsets[col]
                 {
@@ -131,6 +155,7 @@ where
             }
         }
 
+        // action the new zero
         if let Some((row, col)) = uncovered_zero {
             match assignments.row.iter().enumerate().find(|(_, r)| row == **r) {
                 Some((star_index, star_row)) => {
@@ -166,18 +191,18 @@ where
             continue;
         }
 
-        if assignments.row.len() == h {
+        if assignments.row.len() == size {
             break;
         }
 
         // determine the minimum of non-covered elements
         let mut min = <T as num_traits::Bounded>::max_value();
-        for col in 0..w {
+        for col in 0..size {
             if assignments.covered_cols[col] {
                 continue;
             }
 
-            for row in 0..h {
+            for row in 0..size {
                 if assignments.covered_rows[row] {
                     continue;
                 }
@@ -191,14 +216,14 @@ where
         }
 
         // subtract min from all uncovered rows
-        for i in 0..h {
+        for i in 0..size {
             if !assignments.covered_rows[i] {
                 assignments.rows_offsets[i] += min;
             }
         }
 
         // add min to all covered columns
-        for i in 0..w {
+        for i in 0..size {
             if assignments.covered_cols[i] {
                 assignments.cols_offsets[i] -= min;
             }
